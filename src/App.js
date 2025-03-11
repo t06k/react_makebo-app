@@ -9,12 +9,109 @@ function App() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [currentBatch, setCurrentBatch] = useState(0);
   const BATCH_SIZE = 3900;
+  const PARALLEL_BATCH_SIZE = 50; // 並列処理用のバッチサイズ
+  const CACHE_DURATION = 5 * 60 * 1000; // 5分のキャッシュ期限
 
   // バッチ単位でアイテムを取得する関数
   const getBatchItems = (items, batchNumber) => {
     const itemEntries = Object.entries(items);
     const startIndex = batchNumber * BATCH_SIZE;
     return Object.fromEntries(itemEntries.slice(startIndex, startIndex + BATCH_SIZE));
+  };
+
+  // キャッシュからデータを取得
+  const getPriceFromCache = (id) => {
+    const cached = localStorage.getItem(`price_${id}`);
+    if (cached) {
+      const { price, timestamp } = JSON.parse(cached);
+      if (Date.now() - timestamp < CACHE_DURATION) {
+        return price;
+      }
+      localStorage.removeItem(`price_${id}`);
+    }
+    return null;
+  };
+
+  // キャッシュにデータを保存
+  const cachePriceData = (id, price) => {
+    localStorage.setItem(`price_${id}`, JSON.stringify({
+      price,
+      timestamp: Date.now()
+    }));
+  };
+
+  // 単一アイテムの価格を取得
+  const fetchSinglePrice = async (id) => {
+    const cachedPrice = getPriceFromCache(id);
+    if (cachedPrice) return { id, ...cachedPrice };
+
+    const response = await fetch(`https://universalis.app/api/v2/Hades/${id}`);
+    if (!response.ok) throw new Error(`APIエラー: アイテムID ${id} の取得に失敗しました`);
+    
+    const data = await response.json();
+    if (data.listings && data.listings.length > 0) {
+      const minPrice = Math.min(...data.listings.map(l => l.pricePerUnit));
+      const result = {
+        id,
+        name: itemData[id].ja,
+        price: minPrice,
+        averagePrice: data.averagePrice,
+        lastUploadTime: new Date(data.lastUploadTime).toLocaleString('ja-JP'),
+        listingsCount: data.listings.length
+      };
+      cachePriceData(id, {
+        name: itemData[id].ja,
+        price: minPrice,
+        averagePrice: data.averagePrice,
+        lastUploadTime: new Date(data.lastUploadTime).toLocaleString('ja-JP'),
+        listingsCount: data.listings.length
+      });
+      return result;
+    }
+    return null;
+  };
+
+  // バッチ処理で価格を取得
+  const fetchPriceBatch = async (items) => {
+    const batchPromises = Object.entries(items).map(([id]) => 
+      fetchSinglePrice(id).catch(err => ({ id, error: err.message }))
+    );
+    return Promise.all(batchPromises);
+  };
+
+  // メイン処理：全アイテムの価格を取得
+  const fetchAllPrices = async (items) => {
+    if (!items) return;
+    
+    setLoading(true);
+    setError(null);
+    const prices = [];
+
+    try {
+      const entries = Object.entries(items);
+      const totalBatches = Math.ceil(entries.length / PARALLEL_BATCH_SIZE);
+
+      for (let i = 0; i < totalBatches; i++) {
+        const batchItems = Object.fromEntries(
+          entries.slice(i * PARALLEL_BATCH_SIZE, (i + 1) * PARALLEL_BATCH_SIZE)
+        );
+        const batchResults = await fetchPriceBatch(batchItems);
+        const validResults = batchResults.filter(result => result && !result.error);
+        prices.push(...validResults);
+
+        // 進捗状況を日本語で表示
+        console.log(`処理状況: ${Math.min((i + 1) * PARALLEL_BATCH_SIZE, entries.length)}/${entries.length} アイテム完了`);
+      }
+
+      // 価格の高い順にソート
+      const sortedPrices = prices.sort((a, b) => b.price - a.price);
+      setPriceData(sortedPrices);
+      setLastUpdated(new Date().toLocaleString('ja-JP'));
+    } catch (err) {
+      setError(`データ取得中にエラーが発生しました: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   // item_id.txtを読み込む
@@ -44,59 +141,6 @@ function App() {
     return () => clearInterval(interval);
   }, [itemData, currentBatch]);
 
-  // アイテムの価格を取得する関数
-  const fetchAllPrices = async (items) => {
-    if (!items) return;
-    
-    setLoading(true);
-    setError(null);
-    const prices = [];
-
-    try {
-      // 進捗状況の表示用
-      let processed = 0;
-      const total = Object.keys(items).length;
-
-      for (const [id, item] of Object.entries(items)) {
-        try {
-          const response = await fetch(
-            `https://universalis.app/api/v2/Hades/${id}`
-          );
-
-          if (response.ok) {
-            const data = await response.json();
-            if (data.listings && data.listings.length > 0) {
-              const minPrice = Math.min(...data.listings.map(l => l.pricePerUnit));
-              prices.push({
-                id: id,
-                name: item.ja,
-                price: minPrice
-              });
-            }
-          }
-
-          // 進捗状況を更新
-          processed++;
-          if (processed % 10 === 0) {
-            console.log(`処理進捗: ${processed}/${total}`);
-          }
-
-        } catch (err) {
-          console.error(`Error fetching price for item ${id}:`, err);
-        }
-      }
-
-      // 価格の高い順にソート
-      const sortedPrices = prices.sort((a, b) => b.price - a.price);
-      setPriceData(sortedPrices);
-      setLastUpdated(new Date().toLocaleString());
-    } catch (err) {
-      setError('価格データの取得中にエラーが発生しました');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   // 価格更新ボタンのハンドラー
   const handleRefresh = () => {
     if (itemData) {
@@ -119,9 +163,8 @@ function App() {
         </button>
         {lastUpdated && (
           <div className="last-updated">
-            最終更新: {lastUpdated}
-            <br />
-            現在のバッチ: {currentBatch + 1} ({currentBatch * BATCH_SIZE + 1}-{(currentBatch + 1) * BATCH_SIZE}番目)
+            <div>最終更新: {lastUpdated}</div>
+            <div>現在のバッチ: {currentBatch + 1} ({currentBatch * BATCH_SIZE + 1}-{(currentBatch + 1) * BATCH_SIZE}番目)</div>
           </div>
         )}
       </div>
@@ -141,6 +184,9 @@ function App() {
             <span className="rank">{index + 1}.</span>
             <span className="item-name">{item.name}</span>
             <span className="item-price">{item.price.toLocaleString()} Gil</span>
+            <span className="item-average-price">平均価格: {item.averagePrice.toLocaleString()} Gil</span>
+            <span className="item-listings-count">出品数: {item.listingsCount}</span>
+            <span className="item-last-upload-time">最終更新: {item.lastUploadTime}</span>
           </div>
         ))}
       </div>
