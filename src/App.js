@@ -127,7 +127,7 @@ function App() {
       .catch(error => setError('アイテムデータの読み込みに失敗しました'));
   }, []);
 
-  // 1時間ごとに次のバッチを取得
+  // 一定時間ごとに次のバッチを取得
   useEffect(() => {
     const interval = setInterval(() => {
       if (itemData) {
@@ -136,7 +136,8 @@ function App() {
         const batchItems = getBatchItems(itemData, nextBatch);
         fetchAllPrices(batchItems);
       }
-    }, 3600000); // 1時間 = 3600000ミリ秒
+    }, 1800000); // 1時間 = 3600000ミリ秒
+                // 30分 = 1800000ミリ秒
 
     return () => clearInterval(interval);
   }, [itemData, currentBatch]);
