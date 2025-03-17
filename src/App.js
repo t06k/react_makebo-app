@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
 
+
 function App() {
   // itemData: 「item_id.txt」から読み込んだアイテムIDと名称のマッピングを保持
   const [itemData, setItemData] = useState(null);
@@ -21,8 +22,7 @@ function App() {
   const PARALLEL_BATCH_SIZE = 8;
   // CACHE_DURATION: 価格をキャッシュする期間(ミリ秒)。ここでは5分
   const CACHE_DURATION = 5 * 60 * 1000;
-  // Parallel_DELAY: 並列処理の間隔(ミリ秒)。ここでは45ms
-  const PARALLEL_DELAY = 50;
+
 
   /**
    * バッチ単位でアイテムオブジェクトを切り出す関数
@@ -131,6 +131,14 @@ function App() {
     return Promise.all(batchPromises);
   };
 
+
+  /**
+   * ミリ秒単位で待機する関数
+   */
+  const sleep = (ms) => {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  };
+
   /**
    * 大量のアイテムデータに対して、複数回のバッチ処理を組み合わせて全価格を取得する関数
    */
@@ -169,9 +177,10 @@ function App() {
           `処理状況: ${Math.min((i + 1) * PARALLEL_BATCH_SIZE, entries.length)}/${entries.length} アイテム完了`
         );
 
-        
-        // 次のイテレーションの前に待機(50ms)
-        await sleep(PARALLEL_DELAY);
+        // 次のバッチへ進む前に50msだけ待機する（最後のバッチ終了後は待機しない）
+        if (i < totalBatches - 1) {
+          await sleep(50);
+        }
       }
 
       // 取得したアイテムを価格の高い順に並び替えてstateに格納
