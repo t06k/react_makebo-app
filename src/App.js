@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
+import PQueue from 'p-queue';
 
 
 function App() {
@@ -15,9 +16,12 @@ function App() {
   const [lastUpdated, setLastUpdated] = useState(null);
   // currentBatch: どのバッチ(区切り)を取得しているかを表すインデックス
   const [currentBatch, setCurrentBatch] = useState(0);
+  
+  // API取得対象（フィルター済みのアイテムデータ）         
+  const [filteredItemData, setFilteredItemData] = useState(null); 
 
   // BATCH_SIZE: 大きなアイテムリストを分割するときの区切り数
-  const BATCH_SIZE = 3900;
+  const BATCH_SIZE = 2700;
   // PARALLEL_BATCH_SIZE: 並列で一度に処理するアイテム数
   const PARALLEL_BATCH_SIZE = 8;
   // CACHE_DURATION: 価格をキャッシュする期間(ミリ秒)。ここでは5分
@@ -122,13 +126,34 @@ function App() {
    * fetchSinglePriceをアイテム分だけ実行して並列処理を行う
    */
   const fetchPriceBatch = async (items) => {
-    // itemsオブジェクト（{ id: { ja: '名前' }, ... }）を配列形式で.map()を実行
-    const batchPromises = Object.entries(items).map(([id]) =>
-      // fetchSinglePriceの呼び出し。失敗したらエラーを格納したオブジェクトを返す
-      fetchSinglePrice(id).catch(err => ({ id, error: err.message }))
-    );
+    // p-queueでapiの取得制御
+    const queue = new PQueue({
+      concurrency:PARALLEL_BATCH_SIZE, // 上限8の並列実行
+      interval:1000,    //1秒間のインターバル
+      intervalCap:25    //1秒間の最大リクエスト数
+    });
+
+    const entries = Object.entries(items);
+    const results = [];
+
+    // idで毎にfetchSinglericeを実行する
+    for (const [id] of entries){
+      queue.add(async () => {
+        try{
+          if (!itemData) {
+            console.warn('itemDataがnullのままfetchSinglePrice呼び出し');
+          }
+          const result = await fetchSinglePrice(id);
+          if(result) results.push(result);
+        } catch (err){
+          console.error(`ID:${id} エラー`, err);
+        }
+      });
+    }
+    await queue.onIdle();
+
     // 全てのPromiseを待機して結果をまとめて返す
-    return Promise.all(batchPromises);
+    return results;
   };
 
 
@@ -177,9 +202,9 @@ function App() {
           `処理状況: ${Math.min((i + 1) * PARALLEL_BATCH_SIZE, entries.length)}/${entries.length} アイテム完了`
         );
 
-        // 次のバッチへ進む前に50msだけ待機する（最後のバッチ終了後は待機しない）
+        // 次のバッチへ進む前に200msだけ待機する（最後のバッチ終了後は待機しない）
         if (i < totalBatches - 1) {
-          await sleep(50);
+          await sleep(200);
         }
       }
 
@@ -203,16 +228,40 @@ function App() {
    * 読み込んだら、最初のバッチ(0番目)を使って価格データを取得開始する
    */
   useEffect(() => {
-    fetch('/data/item_id.txt')
-      .then(response => response.json())
-      .then(data => {
-        setItemData(data);
-        // 最初の3900件のアイテムの価格を取得
-        const firstBatchItems = getBatchItems(data, 0);
-        fetchAllPrices(firstBatchItems);
+
+    //item_id.txtとmakebo_item_id.txtの両方を読み込む
+    Promise.all([
+      fetch('/data/item_id.txt').then(response => response.json()),
+      fetch('/data/makebo_item_id.txt').then(response => response.json())
+    ])
+      .then(([itemNameData, makeboIds]) => {
+        // itemNameDataには全アイテム名、makeboIdsには検索対象のIDが含まれる
+        setItemData(itemNameData);
+
+        // makeboIdsから必要なアイテム情報だけを抽出
+        const filteredItems = Object.fromEntries(
+          makeboIds.map(id => [id, itemNameData[id]])
+        );
+        // フィルター済みデータをstateへ保存
+        setFilteredItemData(filteredItems);
       })
       .catch(error => setError('アイテムデータの読み込みに失敗しました'));
   }, []);
+
+
+  /**
+   * itemData（全アイテムデータ）と filteredItemData（API取得対象のフィルター済みデータ）が
+   * 両方揃ったタイミングで、アイテム価格取得処理（fetchAllPrices）を実行する。
+   * 
+   * filteredItemDataは makebo_item_id.txt の内容から絞り込んだデータ
+   */
+  useEffect(() => {
+    // 両方のstateが揃ったタイミングだけAPI取得開始
+    if (itemData && filteredItemData) {
+      console.log('itemDataとfilteredItemDataが揃ったのでAPI取得開始');
+      fetchAllPrices(filteredItemData);
+    }
+  }, [itemData, filteredItemData]);
 
   /**
    * 一定時間ごと(ここでは30分)に次のバッチ番号を計算し、
