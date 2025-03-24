@@ -278,11 +278,11 @@ function App() {
         // そのバッチアイテムの価格情報を再取得
         fetchAllPrices(batchItems);
       }
-    }, 1800000); // 30分をミリ秒に変換(1分=60000ms → 30分=1800000ms)
+    }, 300000); // 30分をミリ秒に変換(1分=60000ms → 30分=1800000ms)
 
     // コンポーネントがアンマウントされるときにintervalをクリア
     return () => clearInterval(interval);
-  }, [itemData, currentBatch]);
+  }, [itemData]);
 
   /**
    * 「現在のバッチを更新」ボタンを押したとき、
