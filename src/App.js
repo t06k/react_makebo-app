@@ -27,6 +27,12 @@ function App() {
   // CACHE_DURATION: 価格をキャッシュする期間(ミリ秒)。ここでは5分
   const CACHE_DURATION = 5 * 60 * 1000;
 
+  // 100件処理のやつ
+  // const BULK_SIZE = 100;  // 一括取得サイズ
+  // const BATCH_SIZE = 2700; // 全体のバッチサイズ（変更なし）
+  // const UPDATE_INTERVAL = 300000; // 更新間隔：5分（キャッシュと同期）
+
+
 
   /**
    * バッチ単位でアイテムオブジェクトを切り出す関数
@@ -156,7 +162,6 @@ function App() {
     return results;
   };
 
-
   /**
    * ミリ秒単位で待機する関数
    */
@@ -283,6 +288,47 @@ function App() {
     // コンポーネントがアンマウントされるときにintervalをクリア
     return () => clearInterval(interval);
   }, [itemData]);
+  
+
+// 100件処理のやつ
+// useEffect(() => {
+//   const interval = setInterval(() => {
+//     if (itemData) {
+//       // 現在のバッチから100件ずつ処理
+//       const currentItems = getBatchItems(itemData, currentBatch);
+//       const itemEntries = Object.entries(currentItems);
+      
+//       // 現在のバッチ内での位置を管理
+//       const batchPosition = Math.floor((Date.now() / UPDATE_INTERVAL) % Math.ceil(BATCH_SIZE / BULK_SIZE));
+      
+//       // 100件ずつ取得
+//       const bulkItems = Object.fromEntries(
+//         itemEntries.slice(batchPosition * BULK_SIZE, (batchPosition + 1) * BULK_SIZE)
+//       );
+      
+//       // 現在のバッチが終わったら次のバッチへ
+//       if (batchPosition * BULK_SIZE >= itemEntries.length) {
+//         const nextBatch = (currentBatch + 1) % Math.ceil(Object.keys(itemData).length / BATCH_SIZE);
+//         setCurrentBatch(nextBatch);
+//       }
+      
+//       fetchAllPrices(bulkItems);
+//     }
+//   }, UPDATE_INTERVAL); // 5分間隔に変更
+
+//   return () => clearInterval(interval);
+// }, [itemData, currentBatch]);
+
+
+
+
+
+
+
+
+
+
+
 
   /**
    * 「現在のバッチを更新」ボタンを押したとき、
@@ -333,7 +379,7 @@ function App() {
 
       {/* 価格データをソートして上位10件を表示 */}
       <div className="price-ranking">
-        <h2>ランダム抽出の最高額Top 10</h2>
+        <h2>抽出したTop 10</h2>
         {priceData.slice(0, 10).map((item, index) => (
           <div key={item.id} className="price-item">
             <span className="rank">{index + 1}.</span>
