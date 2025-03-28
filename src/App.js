@@ -24,24 +24,16 @@ function App() {
   const PARALLEL_BATCH_SIZE = 8;
   // CACHE_DURATION: 価格をキャッシュする期間(ミリ秒)。ここでは5分
   const CACHE_DURATION = 5 * 60 * 1000;
-
-  // 100件処理のやつ
-  // const BULK_SIZE = 100;  // 一括取得サイズ
-  // const UPDATE_INTERVAL = 300000; // 更新間隔：5分（キャッシュと同期）
-
-
+  // BATCH_SIZE: 一度に処理するバッチサイズ
+  const BATCH_SIZE = 100;  // 追加：バッチサイズを100に設定
 
   /**
    * バッチ単位でアイテムオブジェクトを切り出す関数
-   * items: 全アイテム（IDと名前のマッピングが含まれるオブジェクト）
-   * batchNumber: 取りたいバッチの番号
    */
   const getBatchItems = (items, batchNumber) => {
-    // オブジェクトを配列形式（[[id, {ja: '名前'}], ...]）に変換
     const itemEntries = Object.entries(items);
-    // どの部分を取り出すかの開始インデックス
     const startIndex = batchNumber * BATCH_SIZE;
-    // startIndexからBATCH_SIZE分だけ切り出して、再びオブジェクト形式に戻す
+    // 100件単位で切り出すように修正
     return Object.fromEntries(itemEntries.slice(startIndex, startIndex + BATCH_SIZE));
   };
 
@@ -125,37 +117,78 @@ function App() {
   };
 
   /**
-   * 指定したアイテム群（バッチ）について、それぞれのアイテムの価格を取得する関数
-   * fetchSinglePriceをアイテム分だけ実行して並列処理を行う
+   * 100件単位でアイテムの価格をUniversalis APIから一括取得する関数
    */
-  const fetchPriceBatch = async (items) => {
-    // p-queueでapiの取得制御
-    const queue = new PQueue({
-      concurrency:PARALLEL_BATCH_SIZE, // 上限8の並列実行
-      interval:1000,    //1秒間のインターバル
-      intervalCap:25    //1秒間の最大リクエスト数
-    });
+  const fetchPricesBulk = async (ids) => {
+    const idString = ids.join(',');
+    const response = await fetch(`https://universalis.app/api/v2/Hades/${idString}`);
+    if (!response.ok) {
+      throw new Error(`APIエラー: アイテムの一括取得に失敗しました`);
+    }
 
-    const entries = Object.entries(items);
+    const data = await response.json();
     const results = [];
 
-    // idで毎にfetchSinglericeを実行する
-    for (const [id] of entries){
+    // 各アイテムの情報を処理
+    for (const id of ids) {
+      const item = data.items[id];
+      if (item && item.listings && item.listings.length > 0) {
+        const minPrice = Math.min(...item.listings.map(l => l.pricePerUnit));
+        const result = {
+          id,
+          name: itemData[id].ja,
+          price: minPrice,
+          averagePrice: item.averagePrice,
+          lastUploadTime: new Date(item.lastUploadTime).toLocaleString('ja-JP'),
+          listingsCount: item.listings.length
+        };
+        
+        cachePriceData(id, {
+          name: itemData[id].ja,
+          price: minPrice,
+          averagePrice: item.averagePrice,
+          lastUploadTime: new Date(item.lastUploadTime).toLocaleString('ja-JP'),
+          listingsCount: item.listings.length
+        });
+        
+        results.push(result);
+      }
+    }
+    return results;
+  };
+
+  /**
+   * バッチ処理を100件単位の一括APIリクエストで実行する関数
+   */
+  const fetchPriceBatch = async (items) => {
+    const queue = new PQueue({
+      concurrency: PARALLEL_BATCH_SIZE,
+      interval: 1000,
+      intervalCap: 25
+    });
+
+    const itemIds = Object.keys(items);
+    const results = [];
+    
+    // 100件ずつの配列に分割（APIの制限に合わせる）
+    const chunks = [];
+    for (let i = 0; i < itemIds.length; i += 100) {
+      chunks.push(itemIds.slice(i, i + 100));
+    }
+
+    // 各チャンクを並列処理
+    for (const chunk of chunks) {
       queue.add(async () => {
-        try{
-          if (!itemData) {
-            console.warn('itemDataがnullのままfetchSinglePrice呼び出し');
-          }
-          const result = await fetchSinglePrice(id);
-          if(result) results.push(result);
-        } catch (err){
-          console.error(`ID:${id} エラー`, err);
+        try {
+          const chunkResults = await fetchPricesBulk(chunk);
+          results.push(...chunkResults);
+        } catch (err) {
+          console.error('一括取得エラー:', err);
         }
       });
     }
-    await queue.onIdle();
 
-    // 全てのPromiseを待機して結果をまとめて返す
+    await queue.onIdle();
     return results;
   };
 
@@ -286,47 +319,6 @@ function App() {
     return () => clearInterval(interval);
   }, [itemData]);
   
-
-// 100件処理のやつ
-// useEffect(() => {
-//   const interval = setInterval(() => {
-//     if (itemData) {
-//       // 現在のバッチから100件ずつ処理
-//       const currentItems = getBatchItems(itemData, currentBatch);
-//       const itemEntries = Object.entries(currentItems);
-      
-//       // 現在のバッチ内での位置を管理
-//       const batchPosition = Math.floor((Date.now() / UPDATE_INTERVAL) % Math.ceil(BATCH_SIZE / BULK_SIZE));
-      
-//       // 100件ずつ取得
-//       const bulkItems = Object.fromEntries(
-//         itemEntries.slice(batchPosition * BULK_SIZE, (batchPosition + 1) * BULK_SIZE)
-//       );
-      
-//       // 現在のバッチが終わったら次のバッチへ
-//       if (batchPosition * BULK_SIZE >= itemEntries.length) {
-//         const nextBatch = (currentBatch + 1) % Math.ceil(Object.keys(itemData).length / BATCH_SIZE);
-//         setCurrentBatch(nextBatch);
-//       }
-      
-//       fetchAllPrices(bulkItems);
-//     }
-//   }, UPDATE_INTERVAL); // 5分間隔に変更
-
-//   return () => clearInterval(interval);
-// }, [itemData, currentBatch]);
-
-
-
-
-
-
-
-
-
-
-
-
   /**
    * 「現在のバッチを更新」ボタンを押したとき、
    * 今のcurrentBatchに対応するアイテムの価格を再取得する

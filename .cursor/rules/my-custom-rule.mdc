@@ -1,0 +1,23 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+
+# Your rule content
+
+#　使用するUniversalis APIドキュメントについて
+Universalis REST API
+Welcome to the Universalis documentation page.
+There is a rate limit of 25 req/s (50 req/s burst) on the API, and 15 req/s (30 req/s burst) on the website itself, if you're scraping instead. The number of simultaneous connections per IP is capped to 8.
+
+- Market board sale history
+get - /api/v2/history/{worldDcRegion}/{itemIds}
+Retrieves the history data for the requested item and world or data center. Up to 100 item IDs can be comma-separated in order to retrieve data for multiple items at once.
+
+
+ # apiで取得するアイテムのデータは以下のtxtファイル
+react_makebo-app\public\data\makebo_item_id.txt
+
+# apiで取得したアイテムの日本語名は
+react_makebo-app\public\data\item_id.txt
