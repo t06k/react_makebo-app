@@ -20,16 +20,13 @@ function App() {
   // API取得対象（フィルター済みのアイテムデータ）         
   const [filteredItemData, setFilteredItemData] = useState(null); 
 
-  // BATCH_SIZE: 大きなアイテムリストを分割するときの区切り数
-  const BATCH_SIZE = 2700;
-  // PARALLEL_BATCH_SIZE: 並列で一度に処理するアイテム数
+  // PARALLEL_BATCH_SIZE: 並列で一度に処理する実行数
   const PARALLEL_BATCH_SIZE = 8;
   // CACHE_DURATION: 価格をキャッシュする期間(ミリ秒)。ここでは5分
   const CACHE_DURATION = 5 * 60 * 1000;
 
   // 100件処理のやつ
   // const BULK_SIZE = 100;  // 一括取得サイズ
-  // const BATCH_SIZE = 2700; // 全体のバッチサイズ（変更なし）
   // const UPDATE_INTERVAL = 300000; // 更新間隔：5分（キャッシュと同期）
 
 
@@ -185,7 +182,7 @@ function App() {
     try {
       // オブジェクトを[[id, data], ...]の形式にする
       const entries = Object.entries(items);
-      // 全体をPARALLEL_BATCH_SIZE(50)個ずつ分割し、それが何回必要かを算出
+      // 全体をPARALLEL_BATCH_SIZEで分割し、それが何回必要かを算出
       const totalBatches = Math.ceil(entries.length / PARALLEL_BATCH_SIZE);
 
       // 分割したバッチを順番に処理する
